@@ -1,274 +1,179 @@
-import { Card } from '@/components/ui/card';
-import { Separator } from '@/components/ui/separator';
-import { AlertTriangle, Table2, ImageIcon } from 'lucide-react';
+// ThesisPreview.tsx
 
-interface ThesisData {
-  title?: string;
-  author?: string;
-  abstract?: string;
-  acknowledgments?: string;
-  chapters?: Array<{
-    title: string;
-    content: string;
-    sections?: Array<{ 
-      title: string; 
-      content: string;
-      subsections?: Array<{ title: string; content: string }>;
-    }>;
-    tables?: Array<{ title: string; html: string; caption?: string }>;
-    images?: Array<{ src: string; alt: string; caption?: string }>;
-  }>;
-  bibliography?: string[];
-  tables?: Array<{ title: string; html: string; caption?: string }>;
-  images?: Array<{ src: string; alt: string; caption?: string }>;
-}
+import React from 'react';
+import { Card } from '@/components/ui/card';
+import { GraduationCap, BookOpen, FileText, User, Users, Calendar, University } from 'lucide-react';
+import { ThesisData, JuryMember } from './ThesisParser'; // Assuming parser is in the same folder
+
+// --- 1. PROP INTERFACES ---
 
 interface ThesisPreviewProps {
   data: ThesisData;
 }
 
+interface ContentPageProps {
+  title: string;
+  children: React.ReactNode;
+  icon?: React.ElementType;
+}
+
+interface JuryCardProps {
+  jury: JuryMember[];
+}
+
+// --- 2. SUB-COMPONENTS (for clean architecture) ---
+
+/**
+ * Renders the formatted title page of the thesis.
+ */
+const TitlePage: React.FC<{ data: ThesisData }> = ({ data }) => (
+  <div className="thesis-page page-break-after">
+    <div className="min-h-screen flex flex-col justify-between items-center text-center p-8 md:p-12">
+      <header className="w-full space-y-1">
+        <h2 className="text-xl font-semibold text-gray-700">{data.university || 'University Name'}</h2>
+        <p className="text-lg text-gray-600">{data.faculty || 'Faculty Name'}</p>
+        <p className="text-md text-gray-500">{data.department || 'Department Name'}</p>
+      </header>
+      
+      <main className="space-y-6 flex flex-col items-center my-8">
+        <GraduationCap className="h-20 w-20 text-primary" />
+        <p className="font-semibold text-lg text-primary">DOCTORAL THESIS</p>
+        <h1 className="font-thesis text-4xl md:text-5xl font-bold text-primary leading-tight max-w-3xl">
+          {data.title || 'Doctoral Thesis Title'}
+        </h1>
+        <div className="w-32 h-1 bg-accent mx-auto"></div>
+        <p className="font-interface text-xl text-muted-foreground">
+          Specialty: {data.specialty || 'Specialty'}
+        </p>
+      </main>
+
+      <footer className="space-y-6 w-full">
+        <div className="space-y-2">
+          <p className="font-interface text-lg font-medium text-foreground">Presented by</p>
+          <p className="font-thesis text-3xl font-semibold text-primary">{data.author || 'Author Name'}</p>
+        </div>
+
+        {data.jury && data.jury.length > 0 && <JuryCard jury={data.jury} />}
+        
+        <div className="pt-4 text-muted-foreground">
+          <p className="font-interface text-lg">Submitted on: {data.submissionDate || 'Date'}</p>
+          <p className="font-interface text-md">Academic Year: {data.academicYear || '2024/2025'}</p>
+        </div>
+      </footer>
+    </div>
+  </div>
+);
+
+/**
+ * Renders a card displaying the jury members.
+ */
+const JuryCard: React.FC<JuryCardProps> = ({ jury }) => (
+  <Card className="p-4 md:p-6 text-left max-w-2xl mx-auto bg-slate-50 shadow-md border-slate-200">
+    <h3 className="font-interface font-bold text-center text-lg mb-4 text-primary flex items-center justify-center gap-2">
+      <Users className="h-5 w-5" /> Honorable Jury
+    </h3>
+    <ul className="space-y-2 text-sm md:text-base">
+      {jury.map((member, index) => (
+        <li key={index} className="grid grid-cols-3 gap-4 border-b border-slate-200 pb-2 last:border-b-0">
+          <span className="font-semibold text-slate-600 col-span-1">{member.role}:</span>
+          <div className="col-span-2 flex flex-col">
+            <span className="font-medium text-slate-800">{member.name}</span>
+            <span className="text-xs text-slate-500">{member.affiliation}</span>
+          </div>
+        </li>
+      ))}
+    </ul>
+  </Card>
+);
+
+/**
+ * A generic wrapper for content pages (e.g., Abstract, Dedications) to ensure consistent styling.
+ */
+const ContentPage: React.FC<ContentPageProps> = ({ title, children, icon: Icon = FileText }) => (
+  <div className="thesis-page page-break-after">
+    <h1 className="thesis-title flex items-center gap-3">
+      <Icon className="h-7 w-7 text-primary" />
+      <span>{title}</span>
+    </h1>
+    <div className="thesis-text whitespace-pre-line">
+      {children}
+    </div>
+  </div>
+);
+
+// --- 3. MAIN PREVIEW COMPONENT ---
+
+/**
+ * Renders a full, multi-page preview of a parsed thesis document.
+ * It uses sub-components to render distinct parts like the title page, abstracts,
+ * chapters, and bibliography in a clean, academic format.
+ */
 export const ThesisPreview = ({ data }: ThesisPreviewProps) => {
-  const currentDate = new Date().toLocaleDateString('en-US', {
-    year: 'numeric',
-    month: 'long'
-  });
-
   return (
-    <div className="thesis-container mx-auto">
-      {/* Title Page */}
-      <div className="thesis-page page-break-after">
-        <div className="min-h-screen flex flex-col justify-center items-center text-center">
-          <div className="space-y-12">
-            <div>
-              <h1 className="font-thesis text-5xl font-bold text-primary leading-tight mb-8">
-                {data.title || 'Doctoral Thesis Title'}
-              </h1>
-              <div className="w-24 h-1 bg-accent mx-auto mb-8"></div>
-            </div>
-            
-            <div className="space-y-6">
-              <p className="font-interface text-xl text-muted-foreground">
-                A thesis submitted to the faculty in partial fulfillment<br />
-                of the requirements for the degree of Doctor of Philosophy
-              </p>
-              
-              <div className="space-y-4">
-                <p className="font-interface text-lg font-medium text-foreground">
-                  by
-                </p>
-                <p className="font-thesis text-2xl font-semibold text-primary">
-                  {data.author || 'Author Name'}
-                </p>
-              </div>
-            </div>
-            
-            <div className="mt-16">
-              <p className="font-interface text-lg text-muted-foreground">
-                {currentDate}
-              </p>
-            </div>
-          </div>
-        </div>
-      </div>
+    <div className="thesis-container mx-auto bg-white shadow-2xl rounded-lg overflow-hidden">
+      {/* --- FRONT MATTER --- */}
+      <TitlePage data={data} />
 
-      {/* Table of Contents */}
-      <div className="thesis-page page-break-after">
-        <h1 className="thesis-title">Table of Contents</h1>
-        <div className="space-y-3">
-          {data.abstract && (
-            <div className="flex justify-between border-b border-border pb-1">
-              <span className="font-interface">Abstract</span>
-              <span className="font-interface text-muted-foreground">iii</span>
-            </div>
-          )}
-          {data.acknowledgments && (
-            <div className="flex justify-between border-b border-border pb-1">
-              <span className="font-interface">Acknowledgments</span>
-              <span className="font-interface text-muted-foreground">iv</span>
-            </div>
-          )}
-          {data.chapters?.map((chapter, index) => (
-            <div key={index} className="space-y-2">
-              <div className="flex justify-between border-b border-border pb-1">
-                <span className="font-interface font-medium">
-                  Chapter {index + 1}: {chapter.title}
-                </span>
-                <span className="font-interface text-muted-foreground">{index + 1}</span>
-              </div>
-              {chapter.sections?.map((section, sectionIndex) => (
-                <div key={sectionIndex} className="flex justify-between ml-6">
-                  <span className="font-interface text-muted-foreground">
-                    {section.title}
-                  </span>
-                  <span className="font-interface text-muted-foreground">
-                    {index + 1}.{sectionIndex + 1}
-                  </span>
-                </div>
-              ))}
-            </div>
-          ))}
-          {data.bibliography && (
-            <div className="flex justify-between border-b border-border pb-1">
-              <span className="font-interface">Bibliography</span>
-              <span className="font-interface text-muted-foreground">
-                {(data.chapters?.length || 0) + 2}
-              </span>
-            </div>
-          )}
-        </div>
-      </div>
-
-      {/* Abstract */}
-      {data.abstract && (
-        <div className="thesis-page page-break-after">
-          <h1 className="thesis-title">Abstract</h1>
-          <div className="thesis-text whitespace-pre-line">
-            {data.abstract}
-          </div>
-        </div>
+      {data.dedications && (
+        <ContentPage title="Dedications">
+          <div className="italic text-center max-w-2xl mx-auto"
+               dangerouslySetInnerHTML={{ __html: data.dedications.replace(/\n/g, '<br />') }} />
+        </ContentPage>
       )}
 
-      {/* Acknowledgments */}
       {data.acknowledgments && (
-        <div className="thesis-page page-break-after">
-          <h1 className="thesis-title">Acknowledgments</h1>
-          <div className="thesis-text whitespace-pre-line">
-            {data.acknowledgments}
-          </div>
-        </div>
+        <ContentPage title="Acknowledgments">
+          <div dangerouslySetInnerHTML={{ __html: data.acknowledgments.replace(/\n/g, '<br />') }} />
+        </ContentPage>
       )}
 
-      {/* Chapters */}
-      {data.chapters?.map((chapter, index) => (
+      {Object.entries(data.abstracts).map(([lang, content]) => (
+        <ContentPage key={lang} title={`Abstract (${lang})`}>
+          <div dangerouslySetInnerHTML={{ __html: content.replace(/\n/g, '<br />') }} />
+        </ContentPage>
+      ))}
+
+      {/* --- LISTS (FIGURES, TABLES) --- */}
+      {data.listOfFigures.length > 0 && (
+        <ContentPage title="List of Figures">
+          <ul className="list-none space-y-2">{data.listOfFigures.map((item, index) => <li key={index}>{item}</li>)}</ul>
+        </ContentPage>
+      )}
+      {data.listOfTables.length > 0 && (
+        <ContentPage title="List of Tables">
+          <ul className="list-none space-y-2">{data.listOfTables.map((item, index) => <li key={index}>{item}</li>)}</ul>
+        </ContentPage>
+      )}
+      
+      {/* --- MAIN BODY (CHAPTERS) --- */}
+      {data.chapters.map((chapter, index) => (
         <div key={index} className="thesis-page page-break-before">
-          <h1 className="thesis-chapter">
-            Chapter {index + 1}: {chapter.title}
+          <h1 className="thesis-chapter flex items-center gap-4">
+            <BookOpen className="h-8 w-8 text-primary" />
+            <span>{chapter.title}</span>
           </h1>
-          
-          {chapter.content && (
-            <div className="thesis-text whitespace-pre-line mb-8">
-              {chapter.content}
-            </div>
-          )}
+          <div className="thesis-text whitespace-pre-line mb-8" 
+               dangerouslySetInnerHTML={{ __html: chapter.content.replace(/\n/g, '<br />') }} />
 
-          {/* Chapter Tables */}
-          {chapter.tables && chapter.tables.length > 0 && (
-            <div className="mb-8">
-              {chapter.tables.map((table, tableIndex) => (
-                <div key={tableIndex} className="mb-6">
-                  <h3 className="font-interface text-center font-semibold mb-4 text-primary">
-                    {table.title}
-                  </h3>
-                  <div 
-                    className="overflow-x-auto border rounded-lg shadow-academic-subtle"
-                    dangerouslySetInnerHTML={{ __html: table.html }}
-                  />
-                  {table.caption && (
-                    <p className="thesis-citation text-center mt-2 italic">
-                      {table.caption}
-                    </p>
-                  )}
-                </div>
-              ))}
-            </div>
-          )}
-
-          {/* Chapter Images */}
-          {chapter.images && chapter.images.length > 0 && (
-            <div className="mb-8">
-              {chapter.images.map((image, imageIndex) => (
-                <div key={imageIndex} className="mb-6 text-center">
-                  <img 
-                    src={image.src} 
-                    alt={image.alt}
-                    className="max-w-full h-auto mx-auto border rounded-lg shadow-academic-subtle"
-                    onError={(e) => {
-                      const target = e.target as HTMLImageElement;
-                      target.style.display = 'none';
-                      target.nextElementSibling?.classList.remove('hidden');
-                    }}
-                  />
-                  <div className="hidden bg-muted/50 p-8 rounded-lg border-2 border-dashed border-muted-foreground/30">
-                    <ImageIcon className="h-12 w-12 mx-auto text-muted-foreground mb-2" />
-                    <p className="text-muted-foreground text-sm">
-                      Image not available: {image.alt}
-                    </p>
-                  </div>
-                  {image.caption && (
-                    <p className="thesis-citation mt-2 italic">
-                      Figure {index + 1}.{imageIndex + 1}: {image.caption}
-                    </p>
-                  )}
-                </div>
-              ))}
-            </div>
-          )}
-
-          {/* Sections */}
-          {chapter.sections?.map((section, sectionIndex) => (
-            <div key={sectionIndex} className="mb-8">
-              <h2 className="thesis-section">
-                {index + 1}.{sectionIndex + 1} {section.title}
-              </h2>
-              <div className="thesis-text whitespace-pre-line">
-                {section.content}
-              </div>
-              
-              {/* Handle table references in content */}
-              {(section.content.includes('tableau') || section.content.includes('Table')) && (
-                <div className="bg-accent-light/30 border-l-4 border-accent p-4 rounded-r-lg mt-4">
-                  <div className="flex items-center gap-2 text-accent mb-2">
-                    <Table2 className="h-4 w-4" />
-                    <span className="font-interface font-medium text-sm">Table Reference Found</span>
-                  </div>
-                  <p className="text-sm text-muted-foreground">
-                    This section references tables that may be missing from the original HTML. 
-                    Please include table data in your source document.
-                  </p>
-                </div>
-              )}
+          {chapter.sections.map((section, sectionIndex) => (
+            <div key={sectionIndex} className="mb-8 pl-4 border-l-2 border-slate-200">
+              <h2 className="thesis-section">{section.title}</h2>
+              <div className="thesis-text whitespace-pre-line" 
+                   dangerouslySetInnerHTML={{ __html: section.content.replace(/\n/g, '<br />') }} />
             </div>
           ))}
         </div>
       ))}
 
-      {/* Global Tables Section (if any tables not assigned to chapters) */}
-      {data.tables && data.tables.length > 0 && (
-        <div className="thesis-page page-break-before">
-          <h1 className="thesis-title">Tables and Figures</h1>
-          <div className="space-y-8">
-            {data.tables.map((table, index) => (
-              <div key={index} className="mb-8">
-                <h3 className="font-interface text-center font-semibold mb-4 text-primary">
-                  {table.title}
-                </h3>
-                <div 
-                  className="overflow-x-auto border rounded-lg shadow-academic-subtle"
-                  dangerouslySetInnerHTML={{ __html: table.html }}
-                />
-                {table.caption && (
-                  <p className="thesis-citation text-center mt-2 italic">
-                    {table.caption}
-                  </p>
-                )}
-              </div>
-            ))}
-          </div>
-        </div>
-      )}
-
-      {/* Bibliography */}
-      {data.bibliography && data.bibliography.length > 0 && (
-        <div className="thesis-page page-break-before">
-          <h1 className="thesis-title">Bibliography</h1>
-          <div className="space-y-4">
+      {/* --- BACK MATTER (BIBLIOGRAPHY) --- */}
+      {data.bibliography.length > 0 && (
+        <ContentPage title="Bibliography">
+          <div className="space-y-3 text-sm">
             {data.bibliography.map((ref, index) => (
-              <div key={index} className="thesis-text border-l-2 border-accent/30 pl-4">
-                {ref}
-              </div>
+              <p key={index} className="pl-4 -indent-4">{ref}</p>
             ))}
           </div>
-        </div>
+        </ContentPage>
       )}
     </div>
   );
