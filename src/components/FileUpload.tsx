@@ -4,10 +4,10 @@ import { Button } from '@/components/ui/button';
 import { Progress } from '@/components/ui/progress';
 import { useToast } from '@/hooks/use-toast';
 import { Upload, FileText, AlertCircle, CheckCircle } from 'lucide-react';
-import { parseHtmlThesis } from '@/utils/thesisParser';
+import { parseThesisContent, ThesisData } from '@/utils/thesisParser';
 
 interface FileUploadProps {
-  onFileProcessed: (data: any) => void;
+  onFileProcessed: (data: ThesisData & { rawHtml: string }) => void;
   isProcessing: boolean;
   setIsProcessing: (processing: boolean) => void;
 }
@@ -17,7 +17,7 @@ export const FileUpload = ({ onFileProcessed, isProcessing, setIsProcessing }: F
   const [uploadProgress, setUploadProgress] = useState(0);
   const [dragOver, setDragOver] = useState(false);
 
-  const processFile = async (file: File) => {
+  const processFile = useCallback(async (file: File) => {
     setIsProcessing(true);
     setUploadProgress(0);
 
@@ -35,19 +35,27 @@ export const FileUpload = ({ onFileProcessed, isProcessing, setIsProcessing }: F
 
       const htmlContent = await file.text();
       
-      // Validate that it's actually HTML content
-      if (!htmlContent.toLowerCase().includes('<html') && !htmlContent.includes('<')) {
-        throw new Error('The uploaded file does not appear to contain valid HTML content.');
+      // It's a text parser, not html, so we'll just check for content
+      if (htmlContent.trim().length === 0) {
+        throw new Error('The uploaded file is empty.');
       }
       
-      const parsedData = parseHtmlThesis(htmlContent);
+      const result = parseThesisContent(htmlContent);
+
+      if (!result.success) {
+        throw new Error(result.error);
+      }
+
+      const parsedData = result.data;
 
       // Complete the progress
       clearInterval(progressInterval);
       setUploadProgress(100);
 
-      // Add the raw HTML for fallback
-      parsedData.rawHtml = htmlContent;
+      const dataWithHtml: ThesisData & { rawHtml: string } = {
+        ...parsedData,
+        rawHtml: htmlContent,
+      };
 
       toast({
         title: "Success!",
@@ -56,7 +64,7 @@ export const FileUpload = ({ onFileProcessed, isProcessing, setIsProcessing }: F
       });
 
       setTimeout(() => {
-        onFileProcessed(parsedData);
+        onFileProcessed(dataWithHtml);
         setIsProcessing(false);
       }, 500);
 
@@ -72,7 +80,7 @@ export const FileUpload = ({ onFileProcessed, isProcessing, setIsProcessing }: F
       setIsProcessing(false);
       setUploadProgress(0);
     }
-  };
+  }, [setIsProcessing, setUploadProgress, onFileProcessed, toast]);
 
   const onDrop = useCallback((acceptedFiles: File[]) => {
     const file = acceptedFiles[0];
@@ -89,7 +97,7 @@ export const FileUpload = ({ onFileProcessed, isProcessing, setIsProcessing }: F
       }
     }
     setDragOver(false);
-  }, [toast]);
+  }, [toast, processFile]);
 
   const { getRootProps, getInputProps, isDragActive } = useDropzone({
     onDrop,
