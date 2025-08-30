@@ -48,7 +48,7 @@ export function parseHtmlThesis(htmlContent: string): ParsedThesis {
   // Extract abstract
   const abstractElement = doc.querySelector('[class*="abstract"]') ||
                          doc.querySelector('[id*="abstract"]') ||
-                         doc.querySelector('section:has-text("abstract")');
+                         findElementByText(doc, ['abstract', 'summary']);
   
   if (abstractElement) {
     result.abstract = cleanText(abstractElement.textContent || '');
@@ -176,16 +176,42 @@ function extractContentAfterElement(element: Element): string {
   return content.trim();
 }
 
+// Helper function to find elements containing specific text
+function findElementByText(doc: Document, searchTerms: string[]): Element | null {
+  const allElements = doc.querySelectorAll('*');
+  
+  for (const element of allElements) {
+    const text = element.textContent?.toLowerCase() || '';
+    const tagName = element.tagName.toLowerCase();
+    
+    // Skip script, style, and other non-content elements
+    if (['script', 'style', 'meta', 'link', 'head'].includes(tagName)) {
+      continue;
+    }
+    
+    for (const term of searchTerms) {
+      if (text.includes(term.toLowerCase()) && text.length < 2000) {
+        return element;
+      }
+    }
+  }
+  
+  return null;
+}
+
 function extractBodyContent(doc: Document): string {
   const body = doc.body;
   if (!body) return '';
   
+  // Create a copy to avoid modifying the original
+  const bodyClone = body.cloneNode(true) as Element;
+  
   // Remove script and style elements
-  const scripts = body.querySelectorAll('script, style');
+  const scripts = bodyClone.querySelectorAll('script, style, meta, link');
   scripts.forEach(el => el.remove());
   
   // Get all paragraphs and text content
-  const paragraphs = body.querySelectorAll('p, div');
+  const paragraphs = bodyClone.querySelectorAll('p, div, section, article');
   let content = '';
   
   paragraphs.forEach(p => {

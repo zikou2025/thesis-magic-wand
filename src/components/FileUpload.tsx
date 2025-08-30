@@ -34,6 +34,12 @@ export const FileUpload = ({ onFileProcessed, isProcessing, setIsProcessing }: F
       }, 100);
 
       const htmlContent = await file.text();
+      
+      // Validate that it's actually HTML content
+      if (!htmlContent.toLowerCase().includes('<html') && !htmlContent.includes('<')) {
+        throw new Error('The uploaded file does not appear to contain valid HTML content.');
+      }
+      
       const parsedData = parseHtmlThesis(htmlContent);
 
       // Complete the progress
@@ -56,9 +62,10 @@ export const FileUpload = ({ onFileProcessed, isProcessing, setIsProcessing }: F
 
     } catch (error) {
       console.error('Error processing file:', error);
+      const errorMessage = error instanceof Error ? error.message : 'Unknown error occurred';
       toast({
         title: "Processing Error",
-        description: "There was an issue processing your file. Please try again.",
+        description: `Issue processing your file: ${errorMessage}. Please check that it's a valid HTML file.`,
         variant: "destructive",
         duration: 5000,
       });
