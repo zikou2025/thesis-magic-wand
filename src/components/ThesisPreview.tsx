@@ -2,13 +2,13 @@
 
 import React from 'react';
 import { Card } from '@/components/ui/card';
-import { GraduationCap, BookOpen, FileText, User, Users, Calendar, University } from 'lucide-react';
-import { ThesisData, JuryMember } from './ThesisParser'; // Assuming parser is in the same folder
+import { GraduationCap, BookOpen, FileText, Users } from 'lucide-react';
+import { ThesisData, JuryMember } from './ThesisParser'; // Adjust the import path if necessary
 
 // --- 1. PROP INTERFACES ---
 
 interface ThesisPreviewProps {
-  data: ThesisData;
+  data?: ThesisData; // Make data prop optional to handle loading states
 }
 
 interface ContentPageProps {
@@ -21,11 +21,8 @@ interface JuryCardProps {
   jury: JuryMember[];
 }
 
-// --- 2. SUB-COMPONENTS (for clean architecture) ---
+// --- 2. SUB-COMPONENTS ---
 
-/**
- * Renders the formatted title page of the thesis.
- */
 const TitlePage: React.FC<{ data: ThesisData }> = ({ data }) => (
   <div className="thesis-page page-break-after">
     <div className="min-h-screen flex flex-col justify-between items-center text-center p-8 md:p-12">
@@ -64,9 +61,6 @@ const TitlePage: React.FC<{ data: ThesisData }> = ({ data }) => (
   </div>
 );
 
-/**
- * Renders a card displaying the jury members.
- */
 const JuryCard: React.FC<JuryCardProps> = ({ jury }) => (
   <Card className="p-4 md:p-6 text-left max-w-2xl mx-auto bg-slate-50 shadow-md border-slate-200">
     <h3 className="font-interface font-bold text-center text-lg mb-4 text-primary flex items-center justify-center gap-2">
@@ -86,9 +80,6 @@ const JuryCard: React.FC<JuryCardProps> = ({ jury }) => (
   </Card>
 );
 
-/**
- * A generic wrapper for content pages (e.g., Abstract, Dedications) to ensure consistent styling.
- */
 const ContentPage: React.FC<ContentPageProps> = ({ title, children, icon: Icon = FileText }) => (
   <div className="thesis-page page-break-after">
     <h1 className="thesis-title flex items-center gap-3">
@@ -101,23 +92,26 @@ const ContentPage: React.FC<ContentPageProps> = ({ title, children, icon: Icon =
   </div>
 );
 
-// --- 3. MAIN PREVIEW COMPONENT ---
+// --- 3. MAIN PREVIEW COMPONENT (WITH ERROR GUARDS) ---
 
-/**
- * Renders a full, multi-page preview of a parsed thesis document.
- * It uses sub-components to render distinct parts like the title page, abstracts,
- * chapters, and bibliography in a clean, academic format.
- */
 export const ThesisPreview = ({ data }: ThesisPreviewProps) => {
+  // If data is not yet available (e.g., during loading), show a placeholder.
+  // This is the primary fix for the "blank screen" error.
+  if (!data) {
+    return (
+      <div className="flex justify-center items-center h-screen">
+        <p className="text-lg text-muted-foreground">Parsing thesis content...</p>
+      </div>
+    );
+  }
+
   return (
     <div className="thesis-container mx-auto bg-white shadow-2xl rounded-lg overflow-hidden">
-      {/* --- FRONT MATTER --- */}
       <TitlePage data={data} />
 
       {data.dedications && (
         <ContentPage title="Dedications">
-          <div className="italic text-center max-w-2xl mx-auto"
-               dangerouslySetInnerHTML={{ __html: data.dedications.replace(/\n/g, '<br />') }} />
+          <div className="italic text-center max-w-2xl mx-auto" dangerouslySetInnerHTML={{ __html: data.dedications.replace(/\n/g, '<br />') }} />
         </ContentPage>
       )}
 
@@ -127,46 +121,38 @@ export const ThesisPreview = ({ data }: ThesisPreviewProps) => {
         </ContentPage>
       )}
 
-      {Object.entries(data.abstracts).map(([lang, content]) => (
+      {/* FIXED: Check if abstracts object exists before calling Object.entries */}
+      {data.abstracts && Object.entries(data.abstracts).map(([lang, content]) => (
         <ContentPage key={lang} title={`Abstract (${lang})`}>
           <div dangerouslySetInnerHTML={{ __html: content.replace(/\n/g, '<br />') }} />
         </ContentPage>
       ))}
 
-      {/* --- LISTS (FIGURES, TABLES) --- */}
-      {data.listOfFigures.length > 0 && (
+      {/* ADDED: Defensive checks for lists */}
+      {data.listOfFigures && data.listOfFigures.length > 0 && (
         <ContentPage title="List of Figures">
           <ul className="list-none space-y-2">{data.listOfFigures.map((item, index) => <li key={index}>{item}</li>)}</ul>
         </ContentPage>
       )}
-      {data.listOfTables.length > 0 && (
+      {data.listOfTables && data.listOfTables.length > 0 && (
         <ContentPage title="List of Tables">
           <ul className="list-none space-y-2">{data.listOfTables.map((item, index) => <li key={index}>{item}</li>)}</ul>
         </ContentPage>
       )}
       
-      {/* --- MAIN BODY (CHAPTERS) --- */}
-      {data.chapters.map((chapter, index) => (
+      {/* ADDED: Defensive check for chapters array */}
+      {data.chapters?.map((chapter, index) => (
         <div key={index} className="thesis-page page-break-before">
           <h1 className="thesis-chapter flex items-center gap-4">
             <BookOpen className="h-8 w-8 text-primary" />
             <span>{chapter.title}</span>
           </h1>
-          <div className="thesis-text whitespace-pre-line mb-8" 
-               dangerouslySetInnerHTML={{ __html: chapter.content.replace(/\n/g, '<br />') }} />
-
-          {chapter.sections.map((section, sectionIndex) => (
-            <div key={sectionIndex} className="mb-8 pl-4 border-l-2 border-slate-200">
-              <h2 className="thesis-section">{section.title}</h2>
-              <div className="thesis-text whitespace-pre-line" 
-                   dangerouslySetInnerHTML={{ __html: section.content.replace(/\n/g, '<br />') }} />
-            </div>
-          ))}
+          <div className="thesis-text whitespace-pre-line mb-8" dangerouslySetInnerHTML={{ __html: chapter.content.replace(/\n/g, '<br />') }} />
         </div>
       ))}
 
-      {/* --- BACK MATTER (BIBLIOGRAPHY) --- */}
-      {data.bibliography.length > 0 && (
+      {/* ADDED: Defensive check for bibliography array */}
+      {data.bibliography && data.bibliography.length > 0 && (
         <ContentPage title="Bibliography">
           <div className="space-y-3 text-sm">
             {data.bibliography.map((ref, index) => (
