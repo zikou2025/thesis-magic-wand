@@ -4,7 +4,7 @@ import { Button } from '@/components/ui/button';
 import { Progress } from '@/components/ui/progress';
 import { useToast } from '@/hooks/use-toast';
 import { Upload, FileText, AlertCircle, CheckCircle } from 'lucide-react';
-import { parseThesisContent, ThesisData } from '@/utils/thesisParser';
+import { parseHtmlThesisContent, ThesisData } from './improvedHtmlParser';
 
 interface FileUploadProps {
   onFileProcessed: (data: ThesisData & { rawHtml: string }) => void;
@@ -35,12 +35,12 @@ export const FileUpload = ({ onFileProcessed, isProcessing, setIsProcessing }: F
 
       const htmlContent = await file.text();
       
-      // It's a text parser, not html, so we'll just check for content
       if (htmlContent.trim().length === 0) {
         throw new Error('The uploaded file is empty.');
       }
       
-      const result = parseThesisContent(htmlContent);
+      // Use the improved HTML parser
+      const result = parseHtmlThesisContent(htmlContent);
 
       if (!result.success) {
         throw new Error(result.error);
@@ -57,9 +57,16 @@ export const FileUpload = ({ onFileProcessed, isProcessing, setIsProcessing }: F
         rawHtml: htmlContent,
       };
 
+      // Show warnings if any
+      if (result.warnings && result.warnings.length > 0) {
+        console.warn('Parsing warnings:', result.warnings);
+      }
+
       toast({
         title: "Success!",
-        description: "Your thesis has been processed and formatted.",
+        description: `Your thesis has been processed and formatted. ${
+          result.warnings ? `Found ${result.warnings.length} warnings - check console for details.` : ''
+        }`,
         duration: 3000,
       });
 
@@ -119,7 +126,7 @@ export const FileUpload = ({ onFileProcessed, isProcessing, setIsProcessing }: F
           <h3 className="font-interface text-lg font-medium mb-4">Processing Your Thesis</h3>
           <Progress value={uploadProgress} className="mb-4" />
           <p className="text-sm text-muted-foreground">
-            Extracting content and formatting structure...
+            Parsing HTML content and extracting thesis structure...
           </p>
         </div>
       </div>
@@ -173,11 +180,12 @@ export const FileUpload = ({ onFileProcessed, isProcessing, setIsProcessing }: F
         <div className="flex items-start gap-2">
           <AlertCircle className="h-5 w-5 text-accent mt-0.5 flex-shrink-0" />
           <div className="text-sm">
-            <p className="font-medium text-accent-foreground mb-1">Tips for best results:</p>
+            <p className="font-medium text-accent-foreground mb-1">Improved HTML parsing:</p>
             <ul className="text-muted-foreground space-y-1">
-              <li>• Ensure your HTML contains clear headings (h1, h2, h3, etc.)</li>
-              <li>• Include title and author information in the document</li>
-              <li>• Structure content with proper paragraph tags</li>
+              <li>• Automatically extracts clean text from HTML markup</li>
+              <li>• Preserves formatting while removing display artifacts</li>
+              <li>• Handles complex document structures</li>
+              <li>• Better title and content extraction</li>
             </ul>
           </div>
         </div>
