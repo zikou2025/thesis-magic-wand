@@ -6,12 +6,20 @@ export interface ParsedThesis {
   chapters: Array<{
     title: string;
     content: string;
-    sections?: Array<{ title: string; content: string }>;
+    sections?: Array<{ 
+      title: string; 
+      content: string;
+      subsections?: Array<{ title: string; content: string }>;
+    }>;
+    tables?: Array<{ title: string; html: string; caption?: string }>;
+    images?: Array<{ src: string; alt: string; caption?: string }>;
   }>;
   bibliography?: string[];
   acknowledgments?: string;
   tableOfContents?: boolean;
   rawHtml?: string;
+  tables?: Array<{ title: string; html: string; caption?: string }>;
+  images?: Array<{ src: string; alt: string; caption?: string }>;
 }
 
 export function parseHtmlThesis(htmlContent: string): ParsedThesis {
@@ -20,7 +28,9 @@ export function parseHtmlThesis(htmlContent: string): ParsedThesis {
   const doc = parser.parseFromString(htmlContent, 'text/html');
   
   const result: ParsedThesis = {
-    chapters: []
+    chapters: [],
+    tables: [],
+    images: []
   };
 
   // Extract title - look for h1, title tag, or anything that looks like a title
@@ -63,60 +73,146 @@ export function parseHtmlThesis(htmlContent: string): ParsedThesis {
     result.acknowledgments = cleanText(ackElement.textContent || '');
   }
 
-  // Extract chapters and sections
+  // Extract all tables first
+  const tables = doc.querySelectorAll('table');
+  tables.forEach((table, index) => {
+    const caption = table.querySelector('caption');
+    const tableData = {
+      title: caption ? cleanText(caption.textContent || '') : `Table ${index + 1}`,
+      html: table.outerHTML,
+      caption: caption ? cleanText(caption.textContent || '') : undefined
+    };
+    result.tables?.push(tableData);
+  });
+
+  // Extract all images
+  const images = doc.querySelectorAll('img');
+  images.forEach((img) => {
+    const imageData = {
+      src: img.src || img.getAttribute('src') || '',
+      alt: img.alt || 'Image',
+      caption: img.getAttribute('title') || undefined
+    };
+    if (imageData.src) {
+      result.images?.push(imageData);
+    }
+  });
+
+  // Enhanced chapter and section extraction with academic numbering
   const headings = doc.querySelectorAll('h1, h2, h3, h4, h5, h6');
   let currentChapter: any = null;
+  let currentSection: any = null;
   let chapterCounter = 0;
 
-  headings.forEach((heading, index) => {
-    const tagName = heading.tagName.toLowerCase();
-    const headingText = cleanText(heading.textContent || '');
-    
-    if (!headingText || headingText === result.title) return;
+  // Process all text content to handle academic numbering
+  const bodyText = doc.body ? doc.body.textContent || '' : '';
+  const lines = bodyText.split('\n').map(line => line.trim()).filter(line => line.length > 0);
 
-    // H1 and H2 are treated as chapter headings
-    if (tagName === 'h1' || tagName === 'h2') {
+  let processedLines: string[] = [];
+  let i = 0;
+
+  while (i < lines.length) {
+    const line = lines[i];
+    
+    // Check if this line looks like an academic heading (contains Roman numerals or complex numbering)
+    if (isAcademicHeading(line)) {
       // Save previous chapter if exists
       if (currentChapter) {
+        if (currentSection) {
+          currentChapter.sections = currentChapter.sections || [];
+          currentChapter.sections.push(currentSection);
+        }
         result.chapters.push(currentChapter);
       }
       
       chapterCounter++;
       currentChapter = {
-        title: headingText,
+        title: cleanAcademicTitle(line),
         content: '',
-        sections: []
+        sections: [],
+        tables: result.tables?.filter(table => 
+          table.title.toLowerCase().includes(`tableau ${chapterCounter}`) || 
+          table.title.toLowerCase().includes(`table ${chapterCounter}`)
+        ),
+        images: result.images?.filter(img => 
+          img.alt.toLowerCase().includes(`figure ${chapterCounter}`) ||
+          img.caption?.toLowerCase().includes(`figure ${chapterCounter}`)
+        )
       };
+      currentSection = null;
       
       // Extract content following this heading
-      const content = extractContentAfterElement(heading);
-      currentChapter.content = content;
-      
-    } else if (tagName === 'h3' || tagName === 'h4') {
-      // H3 and H4 are treated as sections within chapters
-      if (currentChapter) {
-        const sectionContent = extractContentAfterElement(heading);
-        currentChapter.sections = currentChapter.sections || [];
-        currentChapter.sections.push({
-          title: headingText,
-          content: sectionContent
-        });
+      i++;
+      let chapterContent = '';
+      while (i < lines.length && !isAcademicHeading(lines[i]) && !isSubHeading(lines[i])) {
+        if (lines[i] && !isTableReference(lines[i])) {
+          chapterContent += lines[i] + '\n\n';
+        }
+        i++;
       }
+      currentChapter.content = chapterContent.trim();
+      continue;
+      
+    } else if (isSubHeading(line) && currentChapter) {
+      // Handle subsections
+      if (currentSection) {
+        currentChapter.sections = currentChapter.sections || [];
+        currentChapter.sections.push(currentSection);
+      }
+      
+      currentSection = {
+        title: cleanAcademicTitle(line),
+        content: ''
+      };
+      
+      // Extract subsection content
+      i++;
+      let sectionContent = '';
+      while (i < lines.length && !isAcademicHeading(lines[i]) && !isSubHeading(lines[i])) {
+        if (lines[i] && !isTableReference(lines[i])) {
+          sectionContent += lines[i] + '\n\n';
+        }
+        i++;
+      }
+      currentSection.content = sectionContent.trim();
+      continue;
     }
-  });
+    
+    i++;
+  }
 
-  // Add the last chapter
+  // Add the last chapter and section
+  if (currentSection && currentChapter) {
+    currentChapter.sections = currentChapter.sections || [];
+    currentChapter.sections.push(currentSection);
+  }
   if (currentChapter) {
     result.chapters.push(currentChapter);
   }
 
-  // If no structured chapters found, create a generic content chapter
+  // If no structured chapters found, create from HTML headings
+  if (result.chapters.length === 0) {
+    headings.forEach((heading, index) => {
+      const headingText = cleanText(heading.textContent || '');
+      if (headingText && headingText !== result.title) {
+        const content = extractContentAfterElement(heading);
+        result.chapters.push({
+          title: headingText,
+          content: content,
+          sections: []
+        });
+      }
+    });
+  }
+
+  // If still no chapters, create a generic content chapter
   if (result.chapters.length === 0) {
     const bodyContent = extractBodyContent(doc);
     if (bodyContent) {
       result.chapters.push({
         title: 'Main Content',
-        content: bodyContent
+        content: bodyContent,
+        sections: []
       });
     }
   }
@@ -141,6 +237,55 @@ function cleanText(text: string): string {
   return text
     .replace(/\s+/g, ' ')
     .replace(/[\n\r\t]/g, ' ')
+    .trim();
+}
+function isAcademicHeading(line: string): boolean {
+  // Check for academic numbering patterns like II.2.2.4.1, Chapter X, etc.
+  const academicPatterns = [
+    /^(I{1,3}V?|IV|VI{0,3}|IX|X{1,3})\.[\d\.]+/,  // Roman numerals with dots
+    /^[\d]+\.[\d\.]+/,                              // Numeric with dots  
+    /^Chapter\s+\d+/i,                              // Chapter X
+    /^Chapitre\s+\d+/i,                             // French chapters
+    /^[A-Z][a-z]*\s+\d+/,                          // Title + number
+    /^[\d]+\.\s*[A-Z]/,                            // Number + space + capital letter
+  ];
+  
+  return academicPatterns.some(pattern => pattern.test(line.trim())) && line.length < 200;
+}
+
+function isSubHeading(line: string): boolean {
+  // Check for subheading patterns
+  const subPatterns = [
+    /^[\d]+\.[\d\.]+\.[\d\.]+/,     // Multiple level numbering
+    /^[a-z]\)/,                     // a), b), c)
+    /^[A-Z]\./,                     // A. B. C.
+    /^·\s/,                         // Bullet points with ·
+    /^-\s/,                         // Dash bullet points
+  ];
+  
+  return subPatterns.some(pattern => pattern.test(line.trim())) && 
+         line.length > 10 && line.length < 150;
+}
+
+function isTableReference(line: string): boolean {
+  const tablePatterns = [
+    /Le tableau\s+\d+/i,
+    /Table\s+\d+/i,
+    /Tableau\s+\d+/i,
+    /Figure\s+\d+/i,
+  ];
+  
+  return tablePatterns.some(pattern => pattern.test(line));
+}
+
+function cleanAcademicTitle(title: string): string {
+  return title
+    .replace(/^[\d\.\s]+/, '')          // Remove leading numbers
+    .replace(/^[IVX\.\s]+/, '')         // Remove Roman numerals
+    .replace(/^[a-z]\)\s*/, '')         // Remove a), b), etc.
+    .replace(/^[A-Z]\.\s*/, '')         // Remove A., B., etc.
+    .replace(/^·\s*/, '')               // Remove bullet points
+    .replace(/^-\s*/, '')               // Remove dashes
     .trim();
 }
 
