@@ -1,28 +1,17 @@
-// ThesisParser.ts
+// improvedHtmlParser.ts
 
-// --- 1. TYPE DEFINITIONS ---
-
-/**
- * Describes the structure of a jury member's information.
- */
 export interface JuryMember {
   readonly role: string;
   readonly name: string;
   readonly affiliation: string;
 }
 
-/**
- * Represents a section within a chapter.
- */
 export interface ThesisSection {
   readonly title: string;
   readonly content: string;
-  readonly level?: number; // For hierarchical sections (1, 2, 3, etc.)
+  readonly level?: number;
 }
 
-/**
- * Represents a chapter in the thesis.
- */
 export interface ThesisChapter {
   readonly title: string;
   readonly content: string;
@@ -30,16 +19,9 @@ export interface ThesisChapter {
   readonly pageNumber?: number;
 }
 
-/**
- * Multi-language abstracts with proper typing.
- */
 export type AbstractLanguages = 'French' | 'English' | 'Arabic';
 export type ThesisAbstracts = Partial<Record<AbstractLanguages, string>>;
 
-/**
- * Defines the comprehensive data structure for a parsed thesis document.
- * This interface serves as the contract between the parser and the preview component.
- */
 export interface ThesisData {
   readonly title: string;
   readonly author: string;
@@ -65,19 +47,6 @@ export interface ThesisData {
   };
 }
 
-/**
- * Configuration options for the parser.
- */
-export interface ParserConfig {
-  readonly preserveFormatting?: boolean;
-  readonly extractMetadata?: boolean;
-  readonly strictMode?: boolean;
-  readonly languageDetection?: boolean;
-}
-
-/**
- * Result type for parsing operations with error handling.
- */
 export type ParseResult<T> = {
   readonly success: true;
   readonly data: T;
@@ -88,115 +57,143 @@ export type ParseResult<T> = {
   readonly partialData?: Partial<T>;
 };
 
-// --- 2. CONSTANTS AND UTILITIES ---
-
 /**
- * Regular expressions for parsing different sections of the thesis.
+ * HTML parsing utilities
  */
-const PARSING_PATTERNS = {
-  // Metadata patterns
-  author: /Présentée\s+par\s*:\s*(.*?)(?:\n|$)/i,
-  specialty: /Spécialité\s*:\s*(.*?)(?:\n|$)/i,
-  submissionDate: /Soutenue\s+le\s*:\s*(.*?)(?:\n|$)/i,
-  university: /UNIVERSITÉ\s+(.*?)(?:\n|$)/i,
-  faculty: /FACULTÉ\s+DES\s+(.*?)(?:\n|$)/i,
-  department: /Département\s+(.*?)(?:\n|$)/i,
-  academicYear: /Année\s+universitaire\s+(.*?)(?:\n|$)/i,
-  
-  // Jury patterns
-  juryRole: /(Présidente?\s+de\s+jury|Examinateurs?|Directrice?\s+de\s+thèse|Co-Directrice?\s+de\s+thèse)\s*:\s*([^,\n]+),?\s*(.*?)(?:\n|$)/i,
-  
-  // Chapter patterns
-  mainChapter: /^(I{1,3}|IV|V|VI{1,3}|IX|X{1,3})\.\s*(.*?)$/,
-  subSection: /^(\d+\.\d+)\s*(.*?)$/,
-  subSubSection: /^(\d+\.\d+\.\d+)\s*(.*?)$/,
-  
-  // List patterns
-  figure: /^Figure\s+\d+/i,
-  table: /^Tableau\s+\d+/i,
-  
-  // Section headers
-  sections: {
-    acknowledgments: /^Remerciements?/i,
-    dedications: /^Dédicaces?/i,
-    abstractFr: /^Résumé/i,
-    abstractEn: /^Abstract/i,
-    abstractAr: /^الملخص/i,
-    listOfFigures: /^Liste\s+des\s+figures/i,
-    listOfTables: /^Liste\s+des\s+tableaux|Table\s+des\s+matières/i,
-    bibliography: /^(Références?|Bibliographie)/i,
-    introduction: /^I\.\s*Introduction/i
+class HtmlParser {
+  private parser: DOMParser;
+
+  constructor() {
+    this.parser = new DOMParser();
   }
-} as const;
-
-/**
- * Utility functions for text processing.
- */
-const TextUtils = {
-  /**
-   * Cleans and normalizes text by removing extra whitespace and special characters.
-   */
-  normalize: (text: string): string => 
-    text.trim().replace(/\s+/g, ' ').replace(/[^\w\s\p{L}\p{N}\p{P}]/gu, ''),
 
   /**
-   * Safely extracts text from regex match.
+   * Parse HTML string into DOM document
    */
-  extractMatch: (text: string, pattern: RegExp, index = 1): string => {
-    const match = text.match(pattern);
-    return match?.[index]?.trim() ?? '';
-  },
+  parseDocument(htmlContent: string): Document {
+    return this.parser.parseFromString(htmlContent, 'text/html');
+  }
 
   /**
-   * Counts words in text (supports multiple languages).
+   * Extract text content from element, preserving some formatting
    */
-  countWords: (text: string): number => {
-    const words = text.trim().split(/\s+/).filter(word => word.length > 0);
-    return words.length;
-  },
+  extractTextContent(element: Element | null): string {
+    if (!element) return '';
+    
+    // Clone the element to avoid modifying the original
+    const clone = element.cloneNode(true) as Element;
+    
+    // Convert some HTML elements to text equivalents
+    this.convertHtmlToText(clone);
+    
+    return clone.textContent?.trim() || '';
+  }
 
   /**
-   * Removes common artifacts from OCR or PDF extraction.
+   * Convert HTML elements to text-friendly equivalents
    */
-  cleanOcrArtifacts: (text: string): string => 
-    text
-      .replace(/Scroll:\s*Horizontal:/gi, '')
-      .replace(/[.:]{2,}/g, '')
-      .replace(/\s+/g, ' ')
-      .trim()
-} as const;
+  private convertHtmlToText(element: Element): void {
+    // Convert <br> to newlines
+    const brs = element.querySelectorAll('br');
+    brs.forEach(br => br.replaceWith('\n'));
+    
+    // Convert <p> to paragraphs with double newlines
+    const paragraphs = element.querySelectorAll('p');
+    paragraphs.forEach(p => {
+      const text = document.createTextNode('\n\n' + (p.textContent || ''));
+      p.replaceWith(text);
+    });
+    
+    // Convert lists to text
+    const lists = element.querySelectorAll('ul, ol');
+    lists.forEach(list => {
+      const items = list.querySelectorAll('li');
+      let listText = '\n';
+      items.forEach((item, index) => {
+        const bullet = list.tagName === 'OL' ? `${index + 1}. ` : '• ';
+        listText += bullet + (item.textContent || '') + '\n';
+      });
+      list.replaceWith(document.createTextNode(listText));
+    });
+    
+    // Handle tables
+    const tables = element.querySelectorAll('table');
+    tables.forEach(table => {
+      const rows = table.querySelectorAll('tr');
+      let tableText = '\n';
+      rows.forEach(row => {
+        const cells = row.querySelectorAll('td, th');
+        const rowText = Array.from(cells).map(cell => cell.textContent || '').join(' | ');
+        tableText += rowText + '\n';
+      });
+      table.replaceWith(document.createTextNode(tableText));
+    });
+  }
 
-// --- 3. ENHANCED PARSER IMPLEMENTATION ---
-
-/**
- * Internal state for the parser to track context during parsing.
- */
-interface ParserState {
-  currentSection: string;
-  contentBuffer: string;
-  currentChapter: Partial<ThesisChapter> | null;
-  isCapturingTitle: boolean;
-  warnings: string[];
-  lineNumber: number;
+  /**
+   * Extract all text from multiple elements
+   */
+  extractFromElements(elements: NodeListOf<Element>): string[] {
+    return Array.from(elements).map(el => this.extractTextContent(el)).filter(text => text.length > 0);
+  }
 }
 
 /**
- * Creates an initial parser state.
+ * Improved HTML thesis parser
  */
-function createInitialState(): ParserState {
-  return {
-    currentSection: 'meta',
-    contentBuffer: '',
-    currentChapter: null,
-    isCapturingTitle: false,
-    warnings: [],
-    lineNumber: 0
-  };
+export function parseHtmlThesisContent(htmlContent: string): ParseResult<ThesisData> {
+  try {
+    const htmlParser = new HtmlParser();
+    const doc = htmlParser.parseDocument(htmlContent);
+    const result = createDefaultThesisData();
+
+    // Extract title - look for various title patterns
+    const title = extractTitle(doc, htmlParser);
+    if (title) {
+      result.title = title;
+    }
+
+    // Extract author information
+    const author = extractAuthor(doc, htmlParser);
+    if (author) {
+      result.author = author;
+    }
+
+    // Extract university information
+    const universityInfo = extractUniversityInfo(doc, htmlParser);
+    Object.assign(result, universityInfo);
+
+    // Extract specialty and academic info
+    const academicInfo = extractAcademicInfo(doc, htmlParser);
+    Object.assign(result, academicInfo);
+
+    // Extract jury information
+    result.jury = extractJury(doc, htmlParser);
+
+    // Extract main content sections
+    const sections = extractContentSections(doc, htmlParser);
+    Object.assign(result, sections);
+
+    // Extract chapters
+    result.chapters = extractChapters(doc, htmlParser);
+
+    // Calculate metadata
+    result.metadata = calculateMetadata(result);
+
+    return {
+      success: true,
+      data: result,
+      warnings: validateAndGetWarnings(result)
+    };
+
+  } catch (error) {
+    return {
+      success: false,
+      error: error instanceof Error ? error.message : 'Unknown parsing error'
+    };
+  }
 }
 
-/**
- * Creates a default thesis data structure with all required fields initialized.
- */
 function createDefaultThesisData(): ThesisData {
   return {
     title: '',
@@ -223,309 +220,260 @@ function createDefaultThesisData(): ThesisData {
   };
 }
 
-/**
- * Parses jury member information from a line of text.
- */
-function parseJuryMember(line: string, state: ParserState): JuryMember | null {
-  const match = line.match(PARSING_PATTERNS.juryRole);
-  if (!match) return null;
-
-  const [, role, name, rawAffiliation] = match;
-  
-  // Clean affiliation by removing common prefixes/suffixes
-  const affiliation = rawAffiliation
-    .replace(/, UDL Sidi Bel Abbès|Pr,?\s*|M\.C\.A,?\s*/g, '')
-    .trim();
-
-  if (!name.trim()) {
-    state.warnings.push(`Empty jury member name at line ${state.lineNumber}`);
-    return null;
-  }
-
-  return {
-    role: role.trim(),
-    name: name.trim(),
-    affiliation: affiliation || 'Unknown Affiliation'
-  };
-}
-
-/**
- * Processes a line based on the current parser state.
- */
-function processLine(line: string, state: ParserState, result: ThesisData): void {
-  const trimmedLine = line.trim();
-  if (!trimmedLine) return;
-
-  state.lineNumber++;
-
-  // Handle title capturing across multiple lines
-  if (/Intitulé|Scroll:\s*Horizontal:/i.test(trimmedLine)) {
-    state.isCapturingTitle = true;
-    const titlePart = trimmedLine.replace(/Intitulé|Scroll:\s*Horizontal:/i, '').trim();
-    if (titlePart) {
-      result.title = result.title ? `${result.title} ${titlePart}` : titlePart;
+function extractTitle(doc: Document, parser: HtmlParser): string {
+  // Try different title extraction strategies
+  const strategies = [
+    // Look for specific title classes or IDs
+    () => doc.querySelector('.thesis-title, #thesis-title, .title'),
+    // Look for the largest heading
+    () => doc.querySelector('h1'),
+    // Look for title in meta
+    () => doc.querySelector('title'),
+    // Look for text containing "alt=" pattern (from your example)
+    () => {
+      const textNodes = getTextNodesContaining(doc, 'alt=');
+      if (textNodes.length > 0) {
+        const text = textNodes[0].textContent || '';
+        const match = text.match(/alt="([^"]+)"/);
+        return match ? createElementWithText(match[1]) : null;
+      }
+      return null;
     }
-    return;
-  }
-
-  if (state.isCapturingTitle) {
-    if (PARSING_PATTERNS.submissionDate.test(trimmedLine)) {
-      state.isCapturingTitle = false;
-      result.title = TextUtils.cleanOcrArtifacts(result.title);
-    } else {
-      result.title = result.title ? `${result.title} ${trimmedLine}` : trimmedLine;
-      return;
-    }
-  }
-
-  // Section detection and switching
-  for (const [sectionName, pattern] of Object.entries(PARSING_PATTERNS.sections)) {
-    if (pattern.test(trimmedLine)) {
-      if (state.currentChapter && state.currentSection === 'body') {
-        finalizeCurrentChapter(state, result);
-      }
-      state.currentSection = sectionName;
-      state.isCapturingTitle = false;
-      return;
-    }
-  }
-
-  // Process content based on current section
-  switch (state.currentSection) {
-    case 'meta':
-      parseMetadataLine(trimmedLine, result, state);
-      break;
-    case 'acknowledgments':
-      result.acknowledgments = appendContent(result.acknowledgments, trimmedLine);
-      break;
-    case 'dedications':
-      result.dedications = appendContent(result.dedications, trimmedLine);
-      break;
-    case 'abstractFr':
-      result.abstracts = { ...result.abstracts, French: appendContent(result.abstracts.French || '', trimmedLine) };
-      break;
-    case 'abstractEn':
-      result.abstracts = { ...result.abstracts, English: appendContent(result.abstracts.English || '', trimmedLine) };
-      break;
-    case 'abstractAr':
-      result.abstracts = { ...result.abstracts, Arabic: appendContent(result.abstracts.Arabic || '', trimmedLine) };
-      break;
-    case 'listOfFigures':
-      if (PARSING_PATTERNS.figure.test(trimmedLine)) {
-        result.listOfFigures = [...result.listOfFigures, trimmedLine];
-      }
-      break;
-    case 'listOfTables':
-      if (PARSING_PATTERNS.table.test(trimmedLine)) {
-        result.listOfTables = [...result.listOfTables, trimmedLine];
-      }
-      break;
-    case 'body':
-      processBodyContent(trimmedLine, state, result);
-      break;
-    case 'bibliography':
-      if (trimmedLine.length > 20) { // Filter out short lines that might be artifacts
-        result.bibliography = [...result.bibliography, trimmedLine];
-      }
-      break;
-    default:
-      state.warnings.push(`Unknown section "${state.currentSection}" at line ${state.lineNumber}`);
-  }
-}
-
-/**
- * Parses metadata from a line of text.
- */
-function parseMetadataLine(line: string, result: ThesisData, state: ParserState): void {
-  const patterns = [
-    { pattern: PARSING_PATTERNS.author, field: 'author' as const },
-    { pattern: PARSING_PATTERNS.specialty, field: 'specialty' as const },
-    { pattern: PARSING_PATTERNS.submissionDate, field: 'submissionDate' as const, transform: (text: string) => text.replace(/[.:]/g, '') },
-    { pattern: PARSING_PATTERNS.university, field: 'university' as const },
-    { pattern: PARSING_PATTERNS.faculty, field: 'faculty' as const, transform: (text: string) => `FACULTÉ DES ${text}` },
-    { pattern: PARSING_PATTERNS.department, field: 'department' as const, transform: (text: string) => `Département ${text}` },
-    { pattern: PARSING_PATTERNS.academicYear, field: 'academicYear' as const }
   ];
 
-  for (const { pattern, field, transform } of patterns) {
-    if (pattern.test(line)) {
-      const value = TextUtils.extractMatch(line, pattern);
-      if (value) {
-        (result as any)[field] = transform ? transform(value) : value;
-        return;
+  for (const strategy of strategies) {
+    const element = strategy();
+    if (element) {
+      const title = parser.extractTextContent(element);
+      if (title && title.length > 10) { // Reasonable title length
+        return cleanTitle(title);
       }
     }
   }
 
-  // Handle jury member parsing
-  const juryMember = parseJuryMember(line, state);
-  if (juryMember) {
-    result.jury = [...result.jury, juryMember];
-  }
+  return '';
 }
 
-/**
- * Processes content in the main body of the thesis.
- */
-function processBodyContent(line: string, state: ParserState, result: ThesisData): void {
-  const chapterMatch = line.match(PARSING_PATTERNS.mainChapter);
-  
-  if (chapterMatch) {
-    if (state.currentChapter) {
-      finalizeCurrentChapter(state, result);
+function extractAuthor(doc: Document, parser: HtmlParser): string {
+  const patterns = [
+    /présentée?\s+par\s*:?\s*([^,\n]+)/i,
+    /author\s*:?\s*([^,\n]+)/i,
+    /candidat\s*:?\s*([^,\n]+)/i
+  ];
+
+  // Search in text content
+  const bodyText = parser.extractTextContent(doc.body);
+  for (const pattern of patterns) {
+    const match = bodyText.match(pattern);
+    if (match && match[1]) {
+      return match[1].trim();
     }
+  }
+
+  return '';
+}
+
+function extractUniversityInfo(doc: Document, parser: HtmlParser) {
+  const result = { university: '', faculty: '', department: '' };
+  const bodyText = parser.extractTextContent(doc.body);
+
+  const patterns = {
+    university: /université\s+([^,\n]+)/i,
+    faculty: /faculté\s+des?\s+([^,\n]+)/i,
+    department: /département\s+([^,\n]+)/i
+  };
+
+  for (const [key, pattern] of Object.entries(patterns)) {
+    const match = bodyText.match(pattern);
+    if (match && match[1]) {
+      result[key as keyof typeof result] = match[1].trim();
+    }
+  }
+
+  return result;
+}
+
+function extractAcademicInfo(doc: Document, parser: HtmlParser) {
+  const result = { specialty: '', submissionDate: '', academicYear: '' };
+  const bodyText = parser.extractTextContent(doc.body);
+
+  const patterns = {
+    specialty: /spécialité\s*:?\s*([^,\n]+)/i,
+    submissionDate: /soutenue?\s+le\s*:?\s*([^,\n]+)/i,
+    academicYear: /année\s+universitaire\s*:?\s*([^,\n]+)/i
+  };
+
+  for (const [key, pattern] of Object.entries(patterns)) {
+    const match = bodyText.match(pattern);
+    if (match && match[1]) {
+      result[key as keyof typeof result] = match[1].trim();
+    }
+  }
+
+  return result;
+}
+
+function extractJury(doc: Document, parser: HtmlParser): JuryMember[] {
+  const jury: JuryMember[] = [];
+  const bodyText = parser.extractTextContent(doc.body);
+
+  const juryPattern = /(président|examinateur|directeur|co-directeur)\s*:?\s*([^,\n]+),?\s*([^,\n]*)/gi;
+  let match;
+
+  while ((match = juryPattern.exec(bodyText)) !== null) {
+    const [, role, name, affiliation] = match;
+    if (name && name.trim()) {
+      jury.push({
+        role: role.trim(),
+        name: name.trim(),
+        affiliation: affiliation ? affiliation.trim() : 'Not specified'
+      });
+    }
+  }
+
+  return jury;
+}
+
+function extractContentSections(doc: Document, parser: HtmlParser) {
+  const sections = {
+    acknowledgments: '',
+    dedications: '',
+    abstracts: {} as ThesisAbstracts,
+    listOfFigures: [] as string[],
+    listOfTables: [] as string[],
+    bibliography: [] as string[]
+  };
+
+  const bodyText = parser.extractTextContent(doc.body);
+
+  // Extract acknowledgments
+  const ackMatch = bodyText.match(/remerciements?\s*:?\s*(.*?)(?=\n\n|\n[A-Z]|$)/is);
+  if (ackMatch && ackMatch[1]) {
+    sections.acknowledgments = ackMatch[1].trim();
+  }
+
+  // Extract dedications
+  const dedMatch = bodyText.match(/dédicaces?\s*:?\s*(.*?)(?=\n\n|\n[A-Z]|$)/is);
+  if (dedMatch && dedMatch[1]) {
+    sections.dedications = dedMatch[1].trim();
+  }
+
+  // Extract French abstract
+  const frAbstractMatch = bodyText.match(/résumé\s*:?\s*(.*?)(?=abstract|mots[- ]clés|$)/is);
+  if (frAbstractMatch && frAbstractMatch[1]) {
+    sections.abstracts.French = frAbstractMatch[1].trim();
+  }
+
+  // Extract English abstract
+  const enAbstractMatch = bodyText.match(/abstract\s*:?\s*(.*?)(?=keywords|résumé|$)/is);
+  if (enAbstractMatch && enAbstractMatch[1]) {
+    sections.abstracts.English = enAbstractMatch[1].trim();
+  }
+
+  return sections;
+}
+
+function extractChapters(doc: Document, parser: HtmlParser): ThesisChapter[] {
+  const chapters: ThesisChapter[] = [];
+  const bodyText = parser.extractTextContent(doc.body);
+
+  // Look for chapter patterns (Roman numerals, etc.)
+  const chapterPattern = /^(I{1,3}|IV|V|VI{1,3}|IX|X{1,3})\.\s*(.*?)$/gm;
+  let match;
+  const chapterMatches = [];
+
+  while ((match = chapterPattern.exec(bodyText)) !== null) {
+    chapterMatches.push({
+      index: match.index,
+      title: match[0],
+      number: match[1]
+    });
+  }
+
+  // Extract content between chapters
+  for (let i = 0; i < chapterMatches.length; i++) {
+    const currentChapter = chapterMatches[i];
+    const nextChapter = chapterMatches[i + 1];
     
-    state.currentChapter = {
-      title: line,
-      content: '',
+    const startIndex = currentChapter.index;
+    const endIndex = nextChapter ? nextChapter.index : bodyText.length;
+    
+    const content = bodyText.substring(startIndex, endIndex);
+    
+    chapters.push({
+      title: currentChapter.title,
+      content: content.trim(),
       sections: []
-    };
-    state.contentBuffer = '';
-  } else {
-    state.contentBuffer = appendContent(state.contentBuffer, line);
+    });
   }
+
+  return chapters;
 }
 
-/**
- * Finalizes the current chapter and adds it to the result.
- */
-function finalizeCurrentChapter(state: ParserState, result: ThesisData): void {
-  if (state.currentChapter) {
-    const chapter: ThesisChapter = {
-      title: state.currentChapter.title || '',
-      content: TextUtils.normalize(state.contentBuffer),
-      sections: state.currentChapter.sections || []
-    };
-    
-    result.chapters = [...result.chapters, chapter];
-    state.currentChapter = null;
-    state.contentBuffer = '';
-  }
-}
-
-/**
- * Safely appends content with proper line breaks.
- */
-function appendContent(existing: string, newContent: string): string {
-  return existing ? `${existing}\n${newContent}` : newContent;
-}
-
-/**
- * Calculates metadata for the parsed thesis.
- */
-function calculateMetadata(result: ThesisData): ThesisData['metadata'] {
-  const allContent = [
-    result.title,
-    result.acknowledgments,
-    result.dedications,
-    ...Object.values(result.abstracts),
-    ...result.chapters.map(ch => ch.content),
-    ...result.bibliography
+function calculateMetadata(data: ThesisData) {
+  const allText = [
+    data.title,
+    data.acknowledgments,
+    data.dedications,
+    ...Object.values(data.abstracts),
+    ...data.chapters.map(ch => ch.content),
+    ...data.bibliography
   ].join(' ');
 
+  const wordCount = allText.split(/\s+/).filter(word => word.length > 0).length;
+
   return {
-    wordCount: TextUtils.countWords(allContent),
-    pageCount: Math.max(1, Math.ceil(TextUtils.countWords(allContent) / 250)), // Assume ~250 words per page
+    wordCount,
+    pageCount: Math.max(1, Math.ceil(wordCount / 250)),
     createdAt: new Date()
   };
 }
 
-/**
- * Validates the parsed thesis data for completeness and consistency.
- */
-function validateThesisData(data: ThesisData): string[] {
-  const errors: string[] = [];
+function validateAndGetWarnings(data: ThesisData): string[] {
+  const warnings: string[] = [];
 
-  if (!data.title) errors.push('Missing thesis title');
-  if (!data.author) errors.push('Missing author name');
-  if (!data.university) errors.push('Missing university name');
-  if (data.chapters.length === 0) errors.push('No chapters found in the document');
-  if (data.jury.length === 0) errors.push('No jury members found');
+  if (!data.title) warnings.push('No title found');
+  if (!data.author) warnings.push('No author found');
+  if (!data.university) warnings.push('No university found');
+  if (data.chapters.length === 0) warnings.push('No chapters found');
 
-  return errors;
+  return warnings;
 }
 
-// --- 4. MAIN PARSER FUNCTION ---
-
-/**
- * Parses raw text content from a thesis document into a structured ThesisData object.
- * Enhanced with comprehensive error handling, validation, and metadata extraction.
- * 
- * @param textContent The complete raw text of the thesis.
- * @param config Optional configuration for parsing behavior.
- * @returns A ParseResult containing either the structured data or error information.
- */
-export function parseThesisContent(
-  textContent: string, 
-  config: ParserConfig = {}
-): ParseResult<ThesisData> {
-  try {
-    if (!textContent || textContent.trim().length === 0) {
-      return {
-        success: false,
-        error: 'Empty or invalid text content provided'
-      };
-    }
-
-    const lines = textContent.split('\n').map(line => line.trim());
-    const result = createDefaultThesisData();
-    const state = createInitialState();
-
-    // Process each line
-    for (const line of lines) {
-      try {
-        processLine(line, state, result);
-      } catch (lineError) {
-        state.warnings.push(
-          `Error processing line ${state.lineNumber}: ${lineError instanceof Error ? lineError.message : 'Unknown error'}`
-        );
+// Utility functions
+function getTextNodesContaining(doc: Document, searchText: string): Text[] {
+  const textNodes: Text[] = [];
+  const walker = document.createTreeWalker(
+    doc.body,
+    NodeFilter.SHOW_TEXT,
+    {
+      acceptNode: (node: Text) => {
+        return node.textContent?.includes(searchText) 
+          ? NodeFilter.FILTER_ACCEPT 
+          : NodeFilter.FILTER_REJECT;
       }
     }
+  );
 
-    // Finalize any remaining chapter
-    if (state.currentChapter) {
-      finalizeCurrentChapter(state, result);
-    }
-
-    // Calculate metadata if requested
-    if (config.extractMetadata !== false) {
-      result.metadata = calculateMetadata(result);
-    }
-
-    // Validate the result
-    const validationErrors = validateThesisData(result);
-    if (validationErrors.length > 0 && config.strictMode) {
-      return {
-        success: false,
-        error: `Validation failed: ${validationErrors.join(', ')}`,
-        partialData: result
-      };
-    }
-
-    return {
-      success: true,
-      data: result,
-      warnings: state.warnings.length > 0 ? state.warnings : undefined
-    };
-
-  } catch (error) {
-    return {
-      success: false,
-      error: error instanceof Error ? error.message : 'Unknown parsing error occurred'
-    };
+  let node;
+  while (node = walker.nextNode()) {
+    textNodes.push(node as Text);
   }
+
+  return textNodes;
 }
 
-/**
- * Legacy function for backward compatibility.
- * @deprecated Use parseThesisContent with proper error handling instead.
- */
-export function parseThesisContentLegacy(textContent: string): ThesisData {
-  const result = parseThesisContent(textContent);
-  if (result.success) {
-    return result.data;
-  } else {
-    console.warn('Parsing failed, returning partial data:', result.error);
-    return result.partialData || createDefaultThesisData();
-  }
+function createElementWithText(text: string): HTMLElement {
+  const div = document.createElement('div');
+  div.textContent = text;
+  return div;
+}
+
+function cleanTitle(title: string): string {
+  return title
+    .replace(/^alt="|"$/g, '') // Remove alt=" and trailing "
+    .replace(/><\/span><span[^>]*>/g, ' ') // Replace span breaks with spaces
+    .replace(/<[^>]+>/g, '') // Remove any remaining HTML tags
+    .replace(/\s+/g, ' ') // Normalize whitespace
+    .trim();
 }
