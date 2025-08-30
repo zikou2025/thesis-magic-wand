@@ -16,18 +16,18 @@ export interface JuryMember {
  * This interface serves as the contract between the parser and the preview component.
  */
 export interface ThesisData {
-  title?: string;
-  author?: string;
-  university?: string;
-  faculty?: string;
-  department?: string;
-  specialty?: string;
-  submissionDate?: string;
-  academicYear?: string;
-  jury?: JuryMember[];
+  title: string;
+  author: string;
+  university: string;
+  faculty: string;
+  department: string;
+  specialty: string;
+  submissionDate: string;
+  academicYear: string;
+  jury: JuryMember[];
   abstracts: { [key: string]: string }; // For multi-language abstracts
-  acknowledgments?: string;
-  dedications?: string;
+  acknowledgments: string;
+  dedications: string;
   listOfFigures: string[];
   listOfTables: string[];
   chapters: Array<{
@@ -45,20 +45,29 @@ export interface ThesisData {
 
 /**
  * Parses raw text content from a thesis document into a structured ThesisData object.
- * It uses a state-machine approach combined with regular expressions to identify and extract
- * distinct sections such as the title page, abstracts, chapters, and bibliography.
+ * This version ensures that all properties on the returned object are initialized to prevent runtime errors.
  * 
  * @param textContent The complete raw text of the thesis.
- * @returns A structured ThesisData object.
+ * @returns A structured and safe-to-render ThesisData object.
  */
 export function parseThesisContent(textContent: string): ThesisData {
   const lines = textContent.split('\n').map(line => line.trim());
 
-  // Initialize the data structure with default values
+  // Initialize the data structure with default non-null values
   const result: ThesisData = {
-    abstracts: {},
-    chapters: [],
+    title: '',
+    author: '',
+    university: '',
+    faculty: '',
+    department: '',
+    specialty: '',
+    submissionDate: '',
+    academicYear: '',
     jury: [],
+    abstracts: {},
+    acknowledgments: '',
+    dedications: '',
+    chapters: [],
     bibliography: [],
     listOfFigures: [],
     listOfTables: [],
@@ -71,7 +80,6 @@ export function parseThesisContent(textContent: string): ThesisData {
   let currentSection: Section = 'meta';
   let contentBuffer = '';
   let currentChapter: { title: string; content: string; sections: any[] } | null = null;
-  let currentSubSection: { title: string; content: string } | null = null;
   let isCapturingTitle = false;
 
   // --- REGEX DEFINITIONS FOR ROBUST PARSING ---
@@ -84,13 +92,11 @@ export function parseThesisContent(textContent: string): ThesisData {
   const academicYearRegex = /Année universitaire\s+(.*)/i;
   const juryRoleRegex = /(Présidente de jury|Examinateurs|Directrice de thèse|Co-Directrice de thèse)\s*:\s*([^,]+),?\s*(.*)/i;
   const mainSectionRegex = /^(I|V|X|II|III|IV|VI|VII|VIII|IX)\.\s*(.*)/; // e.g., I. Introduction
-  const subSectionRegex = /^\w+\.\d+(\.\d+)*\.\s*(.*)/; // e.g., II.1. or II.1.1.
 
   for (const line of lines) {
     if (!line) continue;
 
     // --- SECTION SWITCHING LOGIC ---
-    // Detects headers to switch the current parsing context.
     if (/^Remerciement/i.test(line)) { currentSection = 'acknowledgments'; isCapturingTitle = false; continue; }
     if (/^Dédicaces/i.test(line)) { currentSection = 'dedications'; isCapturingTitle = false; continue; }
     if (/^Résumé/i.test(line)) { currentSection = 'abstract-fr'; isCapturingTitle = false; continue; }
@@ -103,17 +109,10 @@ export function parseThesisContent(textContent: string): ThesisData {
       isCapturingTitle = false;
     }
     if (/^Références/i.test(line)) {
-      // Finalize and push the last chapter before starting bibliography
       if (currentChapter) {
-         if (currentSubSection) {
-            currentSubSection.content = contentBuffer.trim();
-            currentChapter.sections.push(currentSubSection);
-         } else {
-            currentChapter.content = (currentChapter.content + '\n' + contentBuffer).trim();
-         }
+         currentChapter.content = (currentChapter.content + '\n' + contentBuffer).trim();
          result.chapters.push(currentChapter);
          currentChapter = null;
-         currentSubSection = null;
          contentBuffer = '';
       }
       currentSection = 'bibliography';
@@ -121,47 +120,45 @@ export function parseThesisContent(textContent: string): ThesisData {
       continue;
     }
     
-    // --- SPECIAL CASE: MULTI-LINE TITLE CAPTURE ---
     if (/Intitulé|Scroll: Horizontal:/i.test(line)) {
         isCapturingTitle = true;
         const titlePart = line.replace(/Intitulé|Scroll: Horizontal:/i, "").trim();
-        result.title = (result.title || '') + ' ' + titlePart;
+        result.title += ' ' + titlePart;
         continue;
     }
     if (isCapturingTitle) {
-        if (dateRegex.test(line)) { // Stop capturing when we hit the next section
+        if (dateRegex.test(line)) {
             isCapturingTitle = false;
-            result.title = result.title?.trim();
+            result.title = result.title.trim();
         } else {
-            result.title = (result.title || '') + ' ' + line;
+            result.title += ' ' + line;
             continue;
         }
     }
 
-    // --- CONTENT PARSING LOGIC BY SECTION ---
     switch (currentSection) {
       case 'meta':
-        if (authorRegex.test(line)) result.author = line.match(authorRegex)?.[1].trim();
-        else if (specialtyRegex.test(line)) result.specialty = line.match(specialtyRegex)?.[1].trim();
-        else if (dateRegex.test(line)) result.submissionDate = line.match(dateRegex)?.[1].trim().replace(/[.:]/g, '');
-        else if (universityRegex.test(line)) result.university = line.match(universityRegex)?.[1].trim();
-        else if (facultyRegex.test(line)) result.faculty = `FACULTÉ DES ${line.match(facultyRegex)?.[1].trim()}`;
-        else if (departmentRegex.test(line)) result.department = `Département ${line.match(departmentRegex)?.[1].trim()}`;
-        else if (academicYearRegex.test(line)) result.academicYear = line.match(academicYearRegex)?.[1].trim();
+        if (authorRegex.test(line)) result.author = line.match(authorRegex)?.[1].trim() ?? '';
+        else if (specialtyRegex.test(line)) result.specialty = line.match(specialtyRegex)?.[1].trim() ?? '';
+        else if (dateRegex.test(line)) result.submissionDate = line.match(dateRegex)?.[1].trim().replace(/[.:]/g, '') ?? '';
+        else if (universityRegex.test(line)) result.university = line.match(universityRegex)?.[1].trim() ?? '';
+        else if (facultyRegex.test(line)) result.faculty = `FACULTÉ DES ${line.match(facultyRegex)?.[1].trim() ?? ''}`;
+        else if (departmentRegex.test(line)) result.department = `Département ${line.match(departmentRegex)?.[1].trim() ?? ''}`;
+        else if (academicYearRegex.test(line)) result.academicYear = line.match(academicYearRegex)?.[1].trim() ?? '';
         else if (juryRoleRegex.test(line)) {
             const match = line.match(juryRoleRegex);
             if (match) {
                 const affiliation = match[3].replace(/, UDL Sidi Bel Abbès|Pr, |M\.C\.A, /g, "").trim();
-                result.jury?.push({ role: match[1].trim(), name: match[2].trim(), affiliation: affiliation });
+                result.jury.push({ role: match[1].trim(), name: match[2].trim(), affiliation: affiliation });
             }
         }
         break;
         
       case 'acknowledgments':
-        result.acknowledgments = (result.acknowledgments || '') + line + '\n';
+        result.acknowledgments += line + '\n';
         break;
       case 'dedications':
-        result.dedications = (result.dedications || '') + line + '\n';
+        result.dedications += line + '\n';
         break;
       case 'abstract-fr':
         result.abstracts['French'] = (result.abstracts['French'] || '') + line + '\n';
@@ -182,18 +179,11 @@ export function parseThesisContent(textContent: string): ThesisData {
         const chapterMatch = line.match(mainSectionRegex);
         
         if (chapterMatch) {
-            if (currentChapter) { // Save previous chapter
-                if (currentSubSection) {
-                    currentSubSection.content = contentBuffer.trim();
-                    currentChapter.sections.push(currentSubSection);
-                } else {
-                    currentChapter.content = (currentChapter.content + '\n' + contentBuffer).trim();
-                }
+            if (currentChapter) {
+                currentChapter.content = (currentChapter.content + '\n' + contentBuffer).trim();
                 result.chapters.push(currentChapter);
             }
-            // Start new chapter
             currentChapter = { title: line, content: '', sections: [] };
-            currentSubSection = null;
             contentBuffer = '';
         } else {
             contentBuffer += line + '\n';
@@ -201,15 +191,11 @@ export function parseThesisContent(textContent: string): ThesisData {
         break;
 
       case 'bibliography':
-        // A simple check to identify a reference entry
-        if (line.length > 20) {
-            result.bibliography.push(line);
-        }
+        if (line.length > 20) result.bibliography.push(line);
         break;
     }
   }
 
-  // Final cleanup: Push the very last processed chapter/section
   if (currentChapter) {
       currentChapter.content = (currentChapter.content + '\n' + contentBuffer).trim();
       result.chapters.push(currentChapter);
