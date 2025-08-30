@@ -1,370 +1,219 @@
-// HTML thesis parser utility
-export interface ParsedThesis {
+// ThesisParser.ts
+
+// --- 1. TYPE DEFINITIONS ---
+
+/**
+ * Describes the structure of a jury member's information.
+ */
+export interface JuryMember {
+  role: string;
+  name: string;
+  affiliation: string;
+}
+
+/**
+ * Defines the comprehensive data structure for a parsed thesis document.
+ * This interface serves as the contract between the parser and the preview component.
+ */
+export interface ThesisData {
   title?: string;
   author?: string;
-  abstract?: string;
+  university?: string;
+  faculty?: string;
+  department?: string;
+  specialty?: string;
+  submissionDate?: string;
+  academicYear?: string;
+  jury?: JuryMember[];
+  abstracts: { [key: string]: string }; // For multi-language abstracts
+  acknowledgments?: string;
+  dedications?: string;
+  listOfFigures: string[];
+  listOfTables: string[];
   chapters: Array<{
     title: string;
     content: string;
-    sections?: Array<{ 
+    sections: Array<{ 
       title: string; 
       content: string;
-      subsections?: Array<{ title: string; content: string }>;
     }>;
-    tables?: Array<{ title: string; html: string; caption?: string }>;
-    images?: Array<{ src: string; alt: string; caption?: string }>;
   }>;
-  bibliography?: string[];
-  acknowledgments?: string;
-  tableOfContents?: boolean;
-  rawHtml?: string;
-  tables?: Array<{ title: string; html: string; caption?: string }>;
-  images?: Array<{ src: string; alt: string; caption?: string }>;
+  bibliography: string[];
 }
 
-export function parseHtmlThesis(htmlContent: string): ParsedThesis {
-  // Create a DOM parser
-  const parser = new DOMParser();
-  const doc = parser.parseFromString(htmlContent, 'text/html');
-  
-  const result: ParsedThesis = {
+// --- 2. PARSER IMPLEMENTATION ---
+
+/**
+ * Parses raw text content from a thesis document into a structured ThesisData object.
+ * It uses a state-machine approach combined with regular expressions to identify and extract
+ * distinct sections such as the title page, abstracts, chapters, and bibliography.
+ * 
+ * @param textContent The complete raw text of the thesis.
+ * @returns A structured ThesisData object.
+ */
+export function parseThesisContent(textContent: string): ThesisData {
+  const lines = textContent.split('\n').map(line => line.trim());
+
+  // Initialize the data structure with default values
+  const result: ThesisData = {
+    abstracts: {},
     chapters: [],
-    tables: [],
-    images: []
+    jury: [],
+    bibliography: [],
+    listOfFigures: [],
+    listOfTables: [],
   };
 
-  // Extract title - look for h1, title tag, or anything that looks like a title
-  const titleElement = doc.querySelector('h1') || 
-                      doc.querySelector('title') ||
-                      doc.querySelector('[class*="title"]') ||
-                      doc.querySelector('[id*="title"]');
-  
-  if (titleElement) {
-    result.title = cleanText(titleElement.textContent || '');
-  }
+  type Section = 
+    | 'meta' | 'acknowledgments' | 'dedications' | 'abstract-fr' | 'abstract-en' | 'abstract-ar'
+    | 'listOfTables' | 'listOfFigures' | 'body' | 'bibliography';
 
-  // Extract author information
-  const authorElement = doc.querySelector('[class*="author"]') ||
-                       doc.querySelector('[id*="author"]') ||
-                       doc.querySelector('meta[name="author"]');
-  
-  if (authorElement) {
-    result.author = cleanText(
-      authorElement.getAttribute('content') || 
-      authorElement.textContent || ''
-    );
-  }
+  let currentSection: Section = 'meta';
+  let contentBuffer = '';
+  let currentChapter: { title: string; content: string; sections: any[] } | null = null;
+  let currentSubSection: { title: string; content: string } | null = null;
+  let isCapturingTitle = false;
 
-  // Extract abstract
-  const abstractElement = doc.querySelector('[class*="abstract"]') ||
-                         doc.querySelector('[id*="abstract"]') ||
-                         findElementByText(doc, ['abstract', 'summary']);
-  
-  if (abstractElement) {
-    result.abstract = cleanText(abstractElement.textContent || '');
-  }
+  // --- REGEX DEFINITIONS FOR ROBUST PARSING ---
+  const authorRegex = /Présentée par\s*:\s*(.*)/i;
+  const specialtyRegex = /Spécialité\s*:\s*(.*)/i;
+  const dateRegex = /Soutenue le\s*:\s*(.*)/i;
+  const universityRegex = /UNIVERSITÉ\s+(.*)/i;
+  const facultyRegex = /FACULTÉ DES\s+(.*)/i;
+  const departmentRegex = /Département\s+(.*)/i;
+  const academicYearRegex = /Année universitaire\s+(.*)/i;
+  const juryRoleRegex = /(Présidente de jury|Examinateurs|Directrice de thèse|Co-Directrice de thèse)\s*:\s*([^,]+),?\s*(.*)/i;
+  const mainSectionRegex = /^(I|V|X|II|III|IV|VI|VII|VIII|IX)\.\s*(.*)/; // e.g., I. Introduction
+  const subSectionRegex = /^\w+\.\d+(\.\d+)*\.\s*(.*)/; // e.g., II.1. or II.1.1.
 
-  // Extract acknowledgments
-  const ackElement = doc.querySelector('[class*="acknowledgment"]') ||
-                    doc.querySelector('[id*="acknowledgment"]') ||
-                    doc.querySelector('[class*="thanks"]');
-  
-  if (ackElement) {
-    result.acknowledgments = cleanText(ackElement.textContent || '');
-  }
+  for (const line of lines) {
+    if (!line) continue;
 
-  // Extract all tables first
-  const tables = doc.querySelectorAll('table');
-  tables.forEach((table, index) => {
-    const caption = table.querySelector('caption');
-    const tableData = {
-      title: caption ? cleanText(caption.textContent || '') : `Table ${index + 1}`,
-      html: table.outerHTML,
-      caption: caption ? cleanText(caption.textContent || '') : undefined
-    };
-    result.tables?.push(tableData);
-  });
-
-  // Extract all images
-  const images = doc.querySelectorAll('img');
-  images.forEach((img) => {
-    const imageData = {
-      src: img.src || img.getAttribute('src') || '',
-      alt: img.alt || 'Image',
-      caption: img.getAttribute('title') || undefined
-    };
-    if (imageData.src) {
-      result.images?.push(imageData);
+    // --- SECTION SWITCHING LOGIC ---
+    // Detects headers to switch the current parsing context.
+    if (/^Remerciement/i.test(line)) { currentSection = 'acknowledgments'; isCapturingTitle = false; continue; }
+    if (/^Dédicaces/i.test(line)) { currentSection = 'dedications'; isCapturingTitle = false; continue; }
+    if (/^Résumé/i.test(line)) { currentSection = 'abstract-fr'; isCapturingTitle = false; continue; }
+    if (/^Abstract/i.test(line)) { currentSection = 'abstract-en'; isCapturingTitle = false; continue; }
+    if (/^الملخص/i.test(line)) { currentSection = 'abstract-ar'; isCapturingTitle = false; continue; }
+    if (/^Liste des figures/i.test(line)) { currentSection = 'listOfFigures'; isCapturingTitle = false; continue; }
+    if (/^Liste des tableaux|Table des métiers/i.test(line)) { currentSection = 'listOfTables'; isCapturingTitle = false; continue; }
+    if (/^I\.\s*Introduction/i.test(line)) {
+      currentSection = 'body';
+      isCapturingTitle = false;
     }
-  });
-
-  // Enhanced chapter and section extraction with academic numbering
-  const headings = doc.querySelectorAll('h1, h2, h3, h4, h5, h6');
-  let currentChapter: any = null;
-  let currentSection: any = null;
-  let chapterCounter = 0;
-
-  // Process all text content to handle academic numbering
-  const bodyText = doc.body ? doc.body.textContent || '' : '';
-  const lines = bodyText.split('\n').map(line => line.trim()).filter(line => line.length > 0);
-
-  let processedLines: string[] = [];
-  let i = 0;
-
-  while (i < lines.length) {
-    const line = lines[i];
-    
-    // Check if this line looks like an academic heading (contains Roman numerals or complex numbering)
-    if (isAcademicHeading(line)) {
-      // Save previous chapter if exists
+    if (/^Références/i.test(line)) {
+      // Finalize and push the last chapter before starting bibliography
       if (currentChapter) {
-        if (currentSection) {
-          currentChapter.sections = currentChapter.sections || [];
-          currentChapter.sections.push(currentSection);
-        }
-        result.chapters.push(currentChapter);
+         if (currentSubSection) {
+            currentSubSection.content = contentBuffer.trim();
+            currentChapter.sections.push(currentSubSection);
+         } else {
+            currentChapter.content = (currentChapter.content + '\n' + contentBuffer).trim();
+         }
+         result.chapters.push(currentChapter);
+         currentChapter = null;
+         currentSubSection = null;
+         contentBuffer = '';
       }
-      
-      chapterCounter++;
-      currentChapter = {
-        title: cleanAcademicTitle(line),
-        content: '',
-        sections: [],
-        tables: result.tables?.filter(table => 
-          table.title.toLowerCase().includes(`tableau ${chapterCounter}`) || 
-          table.title.toLowerCase().includes(`table ${chapterCounter}`)
-        ),
-        images: result.images?.filter(img => 
-          img.alt.toLowerCase().includes(`figure ${chapterCounter}`) ||
-          img.caption?.toLowerCase().includes(`figure ${chapterCounter}`)
-        )
-      };
-      currentSection = null;
-      
-      // Extract content following this heading
-      i++;
-      let chapterContent = '';
-      while (i < lines.length && !isAcademicHeading(lines[i]) && !isSubHeading(lines[i])) {
-        if (lines[i] && !isTableReference(lines[i])) {
-          chapterContent += lines[i] + '\n\n';
-        }
-        i++;
-      }
-      currentChapter.content = chapterContent.trim();
-      continue;
-      
-    } else if (isSubHeading(line) && currentChapter) {
-      // Handle subsections
-      if (currentSection) {
-        currentChapter.sections = currentChapter.sections || [];
-        currentChapter.sections.push(currentSection);
-      }
-      
-      currentSection = {
-        title: cleanAcademicTitle(line),
-        content: ''
-      };
-      
-      // Extract subsection content
-      i++;
-      let sectionContent = '';
-      while (i < lines.length && !isAcademicHeading(lines[i]) && !isSubHeading(lines[i])) {
-        if (lines[i] && !isTableReference(lines[i])) {
-          sectionContent += lines[i] + '\n\n';
-        }
-        i++;
-      }
-      currentSection.content = sectionContent.trim();
+      currentSection = 'bibliography';
+      isCapturingTitle = false;
       continue;
     }
     
-    i++;
-  }
+    // --- SPECIAL CASE: MULTI-LINE TITLE CAPTURE ---
+    if (/Intitulé|Scroll: Horizontal:/i.test(line)) {
+        isCapturingTitle = true;
+        const titlePart = line.replace(/Intitulé|Scroll: Horizontal:/i, "").trim();
+        result.title = (result.title || '') + ' ' + titlePart;
+        continue;
+    }
+    if (isCapturingTitle) {
+        if (dateRegex.test(line)) { // Stop capturing when we hit the next section
+            isCapturingTitle = false;
+            result.title = result.title?.trim();
+        } else {
+            result.title = (result.title || '') + ' ' + line;
+            continue;
+        }
+    }
 
-  // Add the last chapter and section
-  if (currentSection && currentChapter) {
-    currentChapter.sections = currentChapter.sections || [];
-    currentChapter.sections.push(currentSection);
-  }
-  if (currentChapter) {
-    result.chapters.push(currentChapter);
-  }
+    // --- CONTENT PARSING LOGIC BY SECTION ---
+    switch (currentSection) {
+      case 'meta':
+        if (authorRegex.test(line)) result.author = line.match(authorRegex)?.[1].trim();
+        else if (specialtyRegex.test(line)) result.specialty = line.match(specialtyRegex)?.[1].trim();
+        else if (dateRegex.test(line)) result.submissionDate = line.match(dateRegex)?.[1].trim().replace(/[.:]/g, '');
+        else if (universityRegex.test(line)) result.university = line.match(universityRegex)?.[1].trim();
+        else if (facultyRegex.test(line)) result.faculty = `FACULTÉ DES ${line.match(facultyRegex)?.[1].trim()}`;
+        else if (departmentRegex.test(line)) result.department = `Département ${line.match(departmentRegex)?.[1].trim()}`;
+        else if (academicYearRegex.test(line)) result.academicYear = line.match(academicYearRegex)?.[1].trim();
+        else if (juryRoleRegex.test(line)) {
+            const match = line.match(juryRoleRegex);
+            if (match) {
+                const affiliation = match[3].replace(/, UDL Sidi Bel Abbès|Pr, |M\.C\.A, /g, "").trim();
+                result.jury?.push({ role: match[1].trim(), name: match[2].trim(), affiliation: affiliation });
+            }
+        }
+        break;
+        
+      case 'acknowledgments':
+        result.acknowledgments = (result.acknowledgments || '') + line + '\n';
+        break;
+      case 'dedications':
+        result.dedications = (result.dedications || '') + line + '\n';
+        break;
+      case 'abstract-fr':
+        result.abstracts['French'] = (result.abstracts['French'] || '') + line + '\n';
+        break;
+      case 'abstract-en':
+        result.abstracts['English'] = (result.abstracts['English'] || '') + line + '\n';
+        break;
+      case 'abstract-ar':
+        result.abstracts['Arabic'] = (result.abstracts['Arabic'] || '') + line + '\n';
+        break;
+      case 'listOfFigures':
+        if(/^Figure/i.test(line)) result.listOfFigures.push(line);
+        break;
+      case 'listOfTables':
+        if(/^Tableau/i.test(line)) result.listOfTables.push(line);
+        break;
+      case 'body':
+        const chapterMatch = line.match(mainSectionRegex);
+        
+        if (chapterMatch) {
+            if (currentChapter) { // Save previous chapter
+                if (currentSubSection) {
+                    currentSubSection.content = contentBuffer.trim();
+                    currentChapter.sections.push(currentSubSection);
+                } else {
+                    currentChapter.content = (currentChapter.content + '\n' + contentBuffer).trim();
+                }
+                result.chapters.push(currentChapter);
+            }
+            // Start new chapter
+            currentChapter = { title: line, content: '', sections: [] };
+            currentSubSection = null;
+            contentBuffer = '';
+        } else {
+            contentBuffer += line + '\n';
+        }
+        break;
 
-  // If no structured chapters found, create from HTML headings
-  if (result.chapters.length === 0) {
-    headings.forEach((heading, index) => {
-      const headingText = cleanText(heading.textContent || '');
-      if (headingText && headingText !== result.title) {
-        const content = extractContentAfterElement(heading);
-        result.chapters.push({
-          title: headingText,
-          content: content,
-          sections: []
-        });
-      }
-    });
-  }
-
-  // If still no chapters, create a generic content chapter
-  if (result.chapters.length === 0) {
-    const bodyContent = extractBodyContent(doc);
-    if (bodyContent) {
-      result.chapters.push({
-        title: 'Main Content',
-        content: bodyContent,
-        sections: []
-      });
+      case 'bibliography':
+        // A simple check to identify a reference entry
+        if (line.length > 20) {
+            result.bibliography.push(line);
+        }
+        break;
     }
   }
 
-  // Extract bibliography/references
-  const bibElement = doc.querySelector('[class*="bibliograph"]') ||
-                    doc.querySelector('[class*="reference"]') ||
-                    doc.querySelector('[id*="bibliograph"]') ||
-                    doc.querySelector('[id*="reference"]');
-  
-  if (bibElement) {
-    const bibItems = bibElement.querySelectorAll('li, p');
-    result.bibliography = Array.from(bibItems).map(item => 
-      cleanText(item.textContent || '')
-    ).filter(text => text.length > 10);
+  // Final cleanup: Push the very last processed chapter/section
+  if (currentChapter) {
+      currentChapter.content = (currentChapter.content + '\n' + contentBuffer).trim();
+      result.chapters.push(currentChapter);
   }
 
   return result;
-}
-
-function cleanText(text: string): string {
-  return text
-    .replace(/\s+/g, ' ')
-    .replace(/[\n\r\t]/g, ' ')
-    .trim();
-}
-function isAcademicHeading(line: string): boolean {
-  // Check for academic numbering patterns like II.2.2.4.1, Chapter X, etc.
-  const academicPatterns = [
-    /^(I{1,3}V?|IV|VI{0,3}|IX|X{1,3})\.[\d\.]+/,  // Roman numerals with dots
-    /^[\d]+\.[\d\.]+/,                              // Numeric with dots  
-    /^Chapter\s+\d+/i,                              // Chapter X
-    /^Chapitre\s+\d+/i,                             // French chapters
-    /^[A-Z][a-z]*\s+\d+/,                          // Title + number
-    /^[\d]+\.\s*[A-Z]/,                            // Number + space + capital letter
-  ];
-  
-  return academicPatterns.some(pattern => pattern.test(line.trim())) && line.length < 200;
-}
-
-function isSubHeading(line: string): boolean {
-  // Check for subheading patterns
-  const subPatterns = [
-    /^[\d]+\.[\d\.]+\.[\d\.]+/,     // Multiple level numbering
-    /^[a-z]\)/,                     // a), b), c)
-    /^[A-Z]\./,                     // A. B. C.
-    /^·\s/,                         // Bullet points with ·
-    /^-\s/,                         // Dash bullet points
-  ];
-  
-  return subPatterns.some(pattern => pattern.test(line.trim())) && 
-         line.length > 10 && line.length < 150;
-}
-
-function isTableReference(line: string): boolean {
-  const tablePatterns = [
-    /Le tableau\s+\d+/i,
-    /Table\s+\d+/i,
-    /Tableau\s+\d+/i,
-    /Figure\s+\d+/i,
-  ];
-  
-  return tablePatterns.some(pattern => pattern.test(line));
-}
-
-function cleanAcademicTitle(title: string): string {
-  return title
-    .replace(/^[\d\.\s]+/, '')          // Remove leading numbers
-    .replace(/^[IVX\.\s]+/, '')         // Remove Roman numerals
-    .replace(/^[a-z]\)\s*/, '')         // Remove a), b), etc.
-    .replace(/^[A-Z]\.\s*/, '')         // Remove A., B., etc.
-    .replace(/^·\s*/, '')               // Remove bullet points
-    .replace(/^-\s*/, '')               // Remove dashes
-    .trim();
-}
-
-function extractContentAfterElement(element: Element): string {
-  let content = '';
-  let currentElement = element.nextElementSibling;
-  
-  while (currentElement) {
-    // Stop if we hit another heading of same or higher level
-    const currentTag = currentElement.tagName.toLowerCase();
-    const elementTag = element.tagName.toLowerCase();
-    
-    if (currentTag.match(/^h[1-6]$/)) {
-      const currentLevel = parseInt(currentTag.charAt(1));
-      const elementLevel = parseInt(elementTag.charAt(1));
-      
-      if (currentLevel <= elementLevel) {
-        break;
-      }
-    }
-    
-    // Add content from paragraphs, divs, and other text containers
-    if (currentTag === 'p' || currentTag === 'div' || currentTag === 'section') {
-      const text = cleanText(currentElement.textContent || '');
-      if (text) {
-        content += text + '\n\n';
-      }
-    }
-    
-    currentElement = currentElement.nextElementSibling;
-  }
-  
-  return content.trim();
-}
-
-// Helper function to find elements containing specific text
-function findElementByText(doc: Document, searchTerms: string[]): Element | null {
-  const allElements = doc.querySelectorAll('*');
-  
-  for (const element of allElements) {
-    const text = element.textContent?.toLowerCase() || '';
-    const tagName = element.tagName.toLowerCase();
-    
-    // Skip script, style, and other non-content elements
-    if (['script', 'style', 'meta', 'link', 'head'].includes(tagName)) {
-      continue;
-    }
-    
-    for (const term of searchTerms) {
-      if (text.includes(term.toLowerCase()) && text.length < 2000) {
-        return element;
-      }
-    }
-  }
-  
-  return null;
-}
-
-function extractBodyContent(doc: Document): string {
-  const body = doc.body;
-  if (!body) return '';
-  
-  // Create a copy to avoid modifying the original
-  const bodyClone = body.cloneNode(true) as Element;
-  
-  // Remove script and style elements
-  const scripts = bodyClone.querySelectorAll('script, style, meta, link');
-  scripts.forEach(el => el.remove());
-  
-  // Get all paragraphs and text content
-  const paragraphs = bodyClone.querySelectorAll('p, div, section, article');
-  let content = '';
-  
-  paragraphs.forEach(p => {
-    const text = cleanText(p.textContent || '');
-    if (text && text.length > 20) { // Only include substantial text
-      content += text + '\n\n';
-    }
-  });
-  
-  return content.trim();
 }
