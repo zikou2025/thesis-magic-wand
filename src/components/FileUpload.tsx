@@ -4,7 +4,7 @@ import { Button } from '@/components/ui/button';
 import { Progress } from '@/components/ui/progress';
 import { useToast } from '@/hooks/use-toast';
 import { Upload, FileText, AlertCircle, CheckCircle } from 'lucide-react';
-import { parseHtmlThesisContent, ThesisData } from './improvedHtmlParser';
+import { parseHtmlThesisContent, ThesisData } from '@/utils/thesisParser';
 
 interface FileUploadProps {
   onFileProcessed: (data: ThesisData & { rawHtml: string }) => void;
